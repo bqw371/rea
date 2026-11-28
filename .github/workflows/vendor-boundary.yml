@@ -25,19 +25,31 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Grep for cross-boundary imports
         timeout-minutes: 3
+        shell: bash
         run: |
           set -u
-          bad=0
+          policy="See docs/vendor-policy.md #import-boundary."
+
           # TS/JS: import ... from '...third_party/...' / require('...third_party/...') / import('...third_party/...')
-          if grep -rnE "(from|require|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*third_party/" src/ bridge/ 2>/dev/null; then
-            bad=1
-          fi
+          set +e
+          ts_out=$(grep -rnE "(from|require|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*third_party/" src/ bridge/)
+          ts_rc=$?
+          set -e
+          case "$ts_rc" in
+            0) echo "$ts_out"; echo "::error::src/ or bridge/ TS/JS imports from third_party/. Shell out across a process boundary instead. $policy"; exit 1 ;;
+            1) : ;;  # no match — carve-out intact
+            *) echo "::error::grep (TS/JS) failed with exit $ts_rc. The vendor-boundary check did NOT actually run."; exit 1 ;;
+          esac
+
           # Python: from third_party.X import ... / import third_party.X
-          if grep -rnE "^[[:space:]]*(from|import)[[:space:]]+third_party[._]" src/ bridge/ 2>/dev/null; then
-            bad=1
-          fi
-          if [ "$bad" -ne 0 ]; then
-            echo "::error::src/ or bridge/ imports from third_party/. Shell out across a process boundary instead. See docs/vendor-policy.md #import-boundary."
-            exit 1
-          fi
+          set +e
+          py_out=$(grep -rnE "^[[:space:]]*(from|import)[[:space:]]+third_party[._]" src/ bridge/)
+          py_rc=$?
+          set -e
+          case "$py_rc" in
+            0) echo "$py_out"; echo "::error::src/ or bridge/ Python imports from third_party/. Shell out across a process boundary instead. $policy"; exit 1 ;;
+            1) : ;;  # no match — carve-out intact
+            *) echo "::error::grep (Python) failed with exit $py_rc. The vendor-boundary check did NOT actually run."; exit 1 ;;
+          esac
+
           echo "vendor-boundary: no cross-boundary imports."
