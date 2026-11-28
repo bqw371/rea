@@ -1,0 +1,43 @@
+name: vendor-boundary
+
+# Standalone vendor-boundary gate. The main ci.yml has a cancel-in-progress
+# concurrency group, so its copy of this job can get swallowed; this workflow
+# has no concurrency: block so it always runs to completion. The in-ci.yml
+# copy is intentionally kept too (belt-and-braces). See docs/vendor-policy.md.
+
+on: [pull_request, push]
+
+permissions:
+  contents: read
+
+jobs:
+  vendor-boundary:
+    name: vendor-boundary (no imports from third_party/)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            src
+            bridge
+          sparse-checkout-cone-mode: false
+      - name: Grep for cross-boundary imports
+        timeout-minutes: 3
+        run: |
+          set -u
+          bad=0
+          # TS/JS: import ... from '...third_party/...' / require('...third_party/...') / import('...third_party/...')
+          if grep -rnE "(from|require|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*third_party/" src/ bridge/ 2>/dev/null; then
+            bad=1
+          fi
+          # Python: from third_party.X import ... / import third_party.X
+          if grep -rnE "^[[:space:]]*(from|import)[[:space:]]+third_party[._]" src/ bridge/ 2>/dev/null; then
+            bad=1
+          fi
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::src/ or bridge/ imports from third_party/. Shell out across a process boundary instead. See docs/vendor-policy.md #import-boundary."
+            exit 1
+          fi
+          echo "vendor-boundary: no cross-boundary imports."
